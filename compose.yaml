@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: locacoes
+      POSTGRES_USER: locacoes
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U locacoes -d locacoes"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+  migrate:
+    build:
+      context: .
+      target: dependencies
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Defina DATABASE_URL com host postgres}
+    volumes:
+      - ./db:/app/db:ro
+      - ./scripts:/app/scripts:ro
+    command: ["pnpm", "db:migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+  app:
+    build: .
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Defina DATABASE_URL com host postgres}
+      ADMIN_USER: ${ADMIN_USER:?Defina ADMIN_USER}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Defina ADMIN_PASSWORD}
+      BRAND_NAME: ${BRAND_NAME:-Gordinho Locações}
+      BRAND_TAGLINE: ${BRAND_TAGLINE:-Equipamentos disponíveis. Obra em movimento.}
+      BRAND_PRIMARY: ${BRAND_PRIMARY:-#f6bc28}
+      BUSINESS_TIMEZONE: ${BUSINESS_TIMEZONE:-America/Cuiaba}
+      WHATSAPP_PROVIDER: disabled
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+volumes:
+  postgres_data:

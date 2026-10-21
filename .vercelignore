@@ -1,0 +1,10 @@
+.local/
+work/
+tests/
+test-results/
+.agents/
+scripts/
+compose.yaml
+Dockerfile
+INICIAR.cmd
+*.log
