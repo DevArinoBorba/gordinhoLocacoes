@@ -1,14 +1,21 @@
 import { Pool } from 'pg';
 
-try { process.loadEnvFile('.env'); } catch {}
+try {
+  process.loadEnvFile('.env');
+} catch {}
+
 const localUrl = process.env.DATABASE_URL || 'postgresql://locacoes:locacoes123@localhost:20000/locacoes';
-const remoteUrl = 'postgresql://postgres.hpaysycuyoeehvrzrdlv:Arino%402000421@aws-0-us-east-1.pooler.supabase.com:6543/postgres';
+const remoteUrl = process.env.SUPABASE_DB_URL;
+if (!remoteUrl) {
+  console.error('Please define SUPABASE_DB_URL in .env');
+  process.exit(1);
+}
 
 const localPool = new Pool({ connectionString: localUrl });
 const remotePool = new Pool({ connectionString: remoteUrl, ssl: { rejectUnauthorized: false } });
 
 async function migrate() {
-  console.log('--- Ingressing Local Data to Supabase ---');
+  console.log('--- Syncing Local PostgreSQL Data to Supabase ---');
 
   // 1. Equipment
   console.log('Migrating equipment...');
@@ -141,16 +148,83 @@ async function migrate() {
   }
   console.log(`✓ Reservation History: ${history.length} rows migrated`);
 
-  // Final verification
+  // 6. Banners
+  console.log('Migrating banners...');
+  const banners = (await localPool.query('SELECT * FROM banners')).rows;
+  for (const b of banners) {
+    await remotePool.query(
+      `INSERT INTO banners (id, eyebrow, title, subtitle, link_url, link_text, image_filename, badge_text, sort_order, active, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       ON CONFLICT (id) DO UPDATE SET
+         eyebrow = EXCLUDED.eyebrow,
+         title = EXCLUDED.title,
+         subtitle = EXCLUDED.subtitle,
+         link_url = EXCLUDED.link_url,
+         link_text = EXCLUDED.link_text,
+         image_filename = EXCLUDED.image_filename,
+         badge_text = EXCLUDED.badge_text,
+         sort_order = EXCLUDED.sort_order,
+         active = EXCLUDED.active,
+         created_at = EXCLUDED.created_at`,
+      [
+        b.id,
+        b.eyebrow,
+        b.title,
+        b.subtitle,
+        b.link_url,
+        b.link_text,
+        b.image_filename,
+        b.badge_text,
+        b.sort_order,
+        b.active,
+        b.created_at,
+      ]
+    );
+  }
+  console.log(`✓ Banners: ${banners.length} rows migrated`);
+
+  // 7. Store Notice
+  console.log('Migrating store notice...');
+  const noticeRes = await localPool.query('SELECT * FROM store_notice WHERE id = 1');
+  if (noticeRes.rows[0]) {
+    const n = noticeRes.rows[0];
+    await remotePool.query(
+      `INSERT INTO store_notice (id, enabled, message, badge_text, link_url, link_text, variant, animated, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (id) DO UPDATE SET
+         enabled = EXCLUDED.enabled,
+         message = EXCLUDED.message,
+         badge_text = EXCLUDED.badge_text,
+         link_url = EXCLUDED.link_url,
+         link_text = EXCLUDED.link_text,
+         variant = EXCLUDED.variant,
+         animated = EXCLUDED.animated,
+         updated_at = EXCLUDED.updated_at`,
+      [
+        n.id,
+        n.enabled,
+        n.message,
+        n.badge_text,
+        n.link_url,
+        n.link_text,
+        n.variant,
+        n.animated,
+        n.updated_at,
+      ]
+    );
+    console.log('✓ Store Notice migrated');
+  }
+
+  // Verification
   console.log('\n--- Remote Row Verification ---');
-  for (const t of ['equipment', 'units', 'customers', 'reservations', 'reservation_history']) {
+  for (const t of ['equipment', 'units', 'customers', 'reservations', 'banners', 'store_notice']) {
     const res = await remotePool.query(`SELECT count(*) FROM ${t}`);
     console.log(`Remote ${t}: ${res.rows[0].count} rows`);
   }
 
   await localPool.end();
   await remotePool.end();
-  console.log('\nAll local data successfully synced to Supabase!');
+  console.log('\nAll data successfully migrated to Supabase!');
 }
 
 migrate().catch((err) => {
