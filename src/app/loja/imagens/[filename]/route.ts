@@ -2,7 +2,6 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { NextResponse } from 'next/server';
 import { photoDirectory } from '@/lib/equipment-photos';
-import { supabase } from '@/lib/supabase';
 
 export async function GET(
   _request: Request,
@@ -13,13 +12,7 @@ export async function GET(
     return new Response(null, { status: 404 });
   }
 
-  if (supabase) {
-    const { data } = supabase.storage.from('equipment-photos').getPublicUrl(filename);
-    if (data?.publicUrl) {
-      return NextResponse.redirect(data.publicUrl, 301);
-    }
-  }
-
+  // 1. Tenta servir do disco local (desenvolvimento / offline)
   try {
     const data = await readFile(join(photoDirectory(), filename));
     return new Response(new Uint8Array(data), {
@@ -30,6 +23,17 @@ export async function GET(
       },
     });
   } catch {
-    return new Response(null, { status: 404 });
+    // Arquivo não está no disco local (ex: rodando na Vercel serverless)
   }
+
+  // 2. Redireciona para o Supabase Storage público (nuvem / produção)
+  const supabaseUrl =
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    process.env.SUPABASE_URL ||
+    'https://hpaysycuyoeehvrzrdlv.supabase.co';
+
+  return NextResponse.redirect(
+    `${supabaseUrl}/storage/v1/object/public/equipment-photos/${filename}`,
+    302
+  );
 }
